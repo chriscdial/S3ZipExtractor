@@ -38,7 +38,7 @@ namespace StatCodingExercise
             ListObjectsResponse listObjectsResponse = S3Client.ListObjectsAsync(AUTH_DATA.STORAGE.BUCKET).Result;
             Console.WriteLine($"... {listObjectsResponse.S3Objects.Count} objects found in bucket");
 
-            RuntimeMetadata runtimeMetadata = await LoadPreviousExecutionData(listObjectsResponse);
+            RuntimeMetadata runtimeMetadata = await LoadPreviousExecutionData();
 
             List<S3Object> archives = listObjectsResponse.S3Objects.Where(obj => obj.Key.EndsWith(".zip")).ToList();
             Console.WriteLine($"... {archives.Count} objects of '.zip' extension");
@@ -75,13 +75,19 @@ namespace StatCodingExercise
                     });
 
                     var csv = zip.Entries.Where(doc => doc.Name.EndsWith(".csv")).Single();
-                    Dictionary<string, List<string>> attachmentsByPoNumber = ParsePoNumberAttachmentRelationship(csv);                    
+                    Dictionary<string, List<string>> attachmentsByPoNumber = ParsePoNumberAttachmentRelationship(csv);
 
                     foreach (var attachment in zip.Entries.Where(doc => doc.Name.EndsWith(".pdf")))
                     {
                         Console.WriteLine($"... processing attachment {attachment.Name}");
                         foreach (var dictEntry in attachmentsByPoNumber.Where(dict => dict.Value.Contains(attachment.Name)))
                         {
+                            if (dictEntry.Key == "Unfiled")
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                                Console.WriteLine($"Could not parse PO Number from attachment {attachment.Name}!");
+                                Console.ForegroundColor = ConsoleColor.DarkGray;
+                            }
                             Task task = UploadAttachmentToS3(dictEntry.Key, attachment);
                         }
                     }
@@ -154,10 +160,17 @@ namespace StatCodingExercise
             return attachmentsByPoNumber;
         }
 
-        private async Task<RuntimeMetadata> LoadPreviousExecutionData(ListObjectsResponse lor)
+        private async Task<RuntimeMetadata> LoadPreviousExecutionData()
         {
+            var findMetadataFileRequest = new ListObjectsRequest();
+            findMetadataFileRequest.BucketName = AUTH_DATA.STORAGE.BUCKET;
+            findMetadataFileRequest.Prefix = MetadataStorageDir;
+
+            ListObjectsResponse findMetadataFileResponse =
+               await S3Client.ListObjectsAsync(findMetadataFileRequest);
+
             RuntimeMetadata runtimeMetadata;
-            var metadataFile = lor.S3Objects.FirstOrDefault(obj => obj.Key == MetadataStorageDir + MetadataFileName);
+            var metadataFile = findMetadataFileResponse.S3Objects.FirstOrDefault(obj => obj.Key == MetadataStorageDir + MetadataFileName);
             if (metadataFile == null)
             {
                 runtimeMetadata = new RuntimeMetadata();
